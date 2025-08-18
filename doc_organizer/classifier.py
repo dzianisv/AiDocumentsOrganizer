@@ -13,7 +13,8 @@ from pdf2image import convert_from_path
 from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -56,14 +57,58 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Could not extract text from PDF {pdf_path}: {e}")
     return text
 
+def get_llm(model_spec: str = "google:gemini-2.5-flash"):
+    """
+    Create an LLM instance based on the model specification.
+    Format: provider:model_name (e.g., "openai:gpt-4o", "google:gemini-2.5-flash")
+    """
+    provider, model_name = model_spec.split(":", 1)
+    
+    if provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+        # Check for custom API base URL
+        base_url = os.environ.get("OPENAI_API_BASE")
+        if base_url and not base_url.endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
+        return ChatOpenAI(
+            temperature=0,
+            openai_api_key=api_key,
+            model_name=model_name,
+            base_url=base_url if base_url else None
+        )
+    elif provider == "google":
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable not set")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0
+        )
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
 def main():
     parser_arg = argparse.ArgumentParser(
         description="Classify documents using Tesseract OCR + LangChain (structured output)."
     )
     parser_arg.add_argument("documents", nargs="+", help="List of document paths to process")
+    parser_arg.add_argument(
+        "--model", 
+        default="google:gemini-2.5-flash",
+        help="Model specification in format provider:model_name (e.g., openai:gpt-4o, google:gemini-2.5-flash)"
+    )
     args = parser_arg.parse_args()
 
-    llm = init_chat_model("gpt-4o-mini", model_provider="openai")
+    # Get LLM based on model specification
+    try:
+        llm = get_llm(args.model)
+        logger.info(f"Using model: {args.model}")
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        return
 
     for document_path in args.documents:
         if not os.path.isfile(document_path):
