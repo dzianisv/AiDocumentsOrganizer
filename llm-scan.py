@@ -9,11 +9,11 @@ from PIL import Image
 import pytesseract
 
 # LangChain imports
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema import SystemMessage, HumanMessage
 from typing import Optional
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -28,25 +28,62 @@ class ScannedDocumentMetadata(BaseModel):
     type: str = Field(description="type of the document: contract, application, receipt, mail, bill")
     merchant: Optional[str] = Field(description="For receipts and bills include the merchant name")
     place: Optional[str] = Field(description="Place where this document was created, if presented")
-    date: Optional[datetime] = Field(description="Date and time when this document was created")
+    date: Optional[str] = Field(description="Date when this document was created in format YYYY-MM-DD if available")
     total: Optional[float] = Field(description="Total amount of the receipt")
     sumary: str = Field(description="short summary of the document")
+
+def get_llm(model_spec: str = "google:gemini-2.5-flash"):
+    """
+    Create an LLM instance based on the model specification.
+    Format: provider:model_name (e.g., "openai:gpt-4o", "google:gemini-2.5-flash")
+    """
+    provider, model_name = model_spec.split(":", 1)
+    
+    if provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+        # Check for custom API base URL
+        base_url = os.environ.get("OPENAI_API_BASE")
+        if base_url and not base_url.endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
+        return ChatOpenAI(
+            temperature=0,
+            openai_api_key=api_key,
+            model_name=model_name,
+            base_url=base_url if base_url else None
+        )
+    elif provider == "google":
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable not set")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0
+        )
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
 
 def main():
     parser_arg = argparse.ArgumentParser(
         description="Classify documents using Tesseract OCR + LangChain (structured output)."
     )
     parser_arg.add_argument("images", nargs="+", help="List of image paths to process")
+    parser_arg.add_argument(
+        "--model", 
+        default="google:gemini-2.5-flash",
+        help="Model specification in format provider:model_name (e.g., openai:gpt-4o, google:gemini-2.5-flash)"
+    )
     args = parser_arg.parse_args()
 
-    # Instantiate your LLM (OpenAI GPT, for example). 
-    # Adjust the model name if needed, e.g. "gpt-3.5-turbo" or "gpt-4".
-    # Make sure your environment variable OPENAI_API_KEY is set if needed.
-    llm = ChatOpenAI(
-        temperature=0,
-        openai_api_key=os.environ.get("OPENAI_API_KEY"),
-        model_name="gpt-4o"
-    )
+    # Get LLM based on model specification
+    try:
+        llm = get_llm(args.model)
+        logger.info(f"Using model: {args.model}")
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        return
 
 
     for image_path in args.images:
@@ -70,11 +107,13 @@ def main():
 
             logger.info(f"{classification_result}")
 
-            # 3) Rename the file based on 'new_document_name' (optional)
-            new_filename = classification_result.get("new_document_name")
+            # 3) Rename the file based on 'file_name' field
+            new_filename = classification_result.file_name
             if new_filename:
                 directory = os.path.dirname(image_path)
-                new_path = os.path.join(directory, new_filename)
+                # Get the original file extension
+                _, ext = os.path.splitext(image_path)
+                new_path = os.path.join(directory, new_filename + ext)
                 
                 if os.path.exists(new_path):
                     logger.info(f"Warning: {new_path} already exists. Skipping rename.")
@@ -82,7 +121,7 @@ def main():
                     os.rename(image_path, new_path)
                     logger.info(f"Renamed '{image_path}' to '{new_path}'")
             else:
-                logger.info("No 'new_document_name' found. Skipping rename.")
+                logger.info("No 'file_name' found. Skipping rename.")
 
         except Exception as e:
             logger.error(f"Classification failed for {image_path}: {e}")
