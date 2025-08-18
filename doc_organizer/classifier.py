@@ -57,11 +57,36 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Could not extract text from PDF {pdf_path}: {e}")
     return text
 
-def get_llm(model_spec: str = "google:gemini-2.5-flash"):
+def detect_available_model():
+    """
+    Automatically detect and return the best available model based on API keys.
+    Priority: Gemini > OpenAI
+    """
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    
+    if gemini_key:
+        logger.info("Detected GEMINI_API_KEY, using Google Gemini 2.5 Flash")
+        return "google:gemini-2.5-flash"
+    elif openai_key:
+        logger.info("Detected OPENAI_API_KEY, using OpenAI GPT-4o-mini")
+        return "openai:gpt-4o-mini"
+    else:
+        raise ValueError(
+            "No API keys found. Please set one of the following environment variables:\n"
+            "  - GEMINI_API_KEY (recommended, get from https://makersuite.google.com/app/apikey)\n"
+            "  - OPENAI_API_KEY (get from https://platform.openai.com/api-keys)"
+        )
+
+def get_llm(model_spec: str = None):
     """
     Create an LLM instance based on the model specification.
+    If no model_spec provided, automatically detect based on available API keys.
     Format: provider:model_name (e.g., "openai:gpt-4o", "google:gemini-2.5-flash")
     """
+    if model_spec is None:
+        model_spec = detect_available_model()
+    
     provider, model_name = model_spec.split(":", 1)
     
     if provider == "openai":
@@ -97,15 +122,20 @@ def main():
     parser_arg.add_argument("documents", nargs="+", help="List of document paths to process")
     parser_arg.add_argument(
         "--model", 
-        default="google:gemini-2.5-flash",
-        help="Model specification in format provider:model_name (e.g., openai:gpt-4o, google:gemini-2.5-flash)"
+        default=None,
+        help="Model specification in format provider:model_name (e.g., openai:gpt-4o, google:gemini-2.5-flash). If not specified, automatically detects based on available API keys."
     )
     args = parser_arg.parse_args()
 
     # Get LLM based on model specification
     try:
-        llm = get_llm(args.model)
-        logger.info(f"Using model: {args.model}")
+        # Store the actual model spec used (either provided or auto-detected)
+        model_spec = args.model
+        llm = get_llm(model_spec)
+        # If model was auto-detected, get the actual spec
+        if model_spec is None:
+            model_spec = detect_available_model()
+        logger.info(f"Using model: {model_spec}")
     except Exception as e:
         logger.error(f"Failed to initialize LLM: {e}")
         return
