@@ -14,9 +14,9 @@ def run_test(image_path, expected_type=None, expected_merchant=None):
     print(f"Expected type: {expected_type}, Expected merchant: {expected_merchant}")
     print('='*60)
     
-    # Run the llm-scan.py script
+    # Run the classifier script
     result = subprocess.run(
-        [sys.executable, "llm-scan.py", image_path],
+        [sys.executable, "doc_organizer/classifier.py", image_path],
         capture_output=True,
         text=True,
         env=os.environ.copy()
@@ -31,7 +31,7 @@ def run_test(image_path, expected_type=None, expected_merchant=None):
     # Parse the output to extract the classification result
     output_lines = result.stdout.strip().split('\n')
     for line in output_lines:
-        if line.startswith("file_name="):
+        if "type=" in line and "sumary=" in line:
             # Parse the Pydantic model output
             print(f"Classification result: {line}")
             

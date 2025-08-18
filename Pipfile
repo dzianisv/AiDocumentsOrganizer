@@ -4,14 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-spacy = "*"
-python-dateutil = "*"
 pytesseract = "*"
 pillow = "*"
 langchain = "*"
 openai = "*"
 pydantic = "*"
 langchain-community = "*"
+langchain-openai = "*"
+pypdf2 = "*"
+pdf2image = "*"
 
 [dev-packages]
 
