@@ -4,6 +4,8 @@ import os
 import sys
 import json
 import subprocess
+import shutil
+import tempfile
 from pathlib import Path
 
 def run_test(image_path, expected_type=None, expected_merchant=None):
@@ -14,13 +16,31 @@ def run_test(image_path, expected_type=None, expected_merchant=None):
     print(f"Expected type: {expected_type}, Expected merchant: {expected_merchant}")
     print('='*60)
     
-    # Run the classifier script
-    result = subprocess.run(
-        [sys.executable, "doc_organizer/classifier.py", image_path],
-        capture_output=True,
-        text=True,
-        env=os.environ.copy()
-    )
+    # Create a temporary copy of the image to avoid renaming the original
+    with tempfile.NamedTemporaryFile(suffix=Path(image_path).suffix, delete=False) as temp_file:
+        temp_path = temp_file.name
+        shutil.copy2(image_path, temp_path)
+    
+    try:
+        # Run the classifier script on the temp copy
+        result = subprocess.run(
+            [sys.executable, "doc_organizer/classifier.py", temp_path],
+            capture_output=True,
+            text=True,
+            env=os.environ.copy()
+        )
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        # Also clean up any renamed file
+        temp_dir = os.path.dirname(temp_path)
+        for file in os.listdir(temp_dir):
+            if file.startswith("2025") and file.endswith(Path(image_path).suffix):
+                try:
+                    os.unlink(os.path.join(temp_dir, file))
+                except:
+                    pass
     
     # Check if the command succeeded
     if result.returncode != 0:
@@ -29,7 +49,10 @@ def run_test(image_path, expected_type=None, expected_merchant=None):
         return False, {"error": result.stderr}
     
     # Parse the output to extract the classification result
-    output_lines = result.stdout.strip().split('\n')
+    # The logging output goes to stderr, so check both stdout and stderr
+    combined_output = result.stdout + "\n" + result.stderr
+    output_lines = combined_output.strip().split('\n')
+    
     for line in output_lines:
         if "type=" in line and "sumary=" in line:
             # Parse the Pydantic model output
