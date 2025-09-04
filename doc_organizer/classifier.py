@@ -73,8 +73,8 @@ def detect_available_model():
         logger.info("Detected GEMINI_API_KEY, using Google Gemini 2.5 Flash")
         return "google:gemini-2.5-flash"
     elif openai_key:
-        logger.info("Detected OPENAI_API_KEY, using OpenAI GPT-4o-mini")
-        return "openai:gpt-4o-mini"
+        logger.info("Detected OPENAI_API_KEY, using OpenAI GPT-5-mini")
+        return "openai:gpt-5-mini"
     else:
         raise ValueError(
             "No API keys found. Please get a free API key from:\n"
