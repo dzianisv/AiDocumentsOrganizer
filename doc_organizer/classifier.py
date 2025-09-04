@@ -60,12 +60,16 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def detect_available_model():
     """
     Automatically detect and return the best available model based on API keys.
-    Priority: Gemini > OpenAI
+    Priority: OpenRouter (DeepSeek R1 Distill Qwen-14B) > OpenRouter (GPT-OSS-20B) > Gemini > OpenAI
     """
     gemini_key = os.environ.get("GEMINI_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
-    
-    if gemini_key:
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+
+    if openrouter_key:
+        logger.info("Detected OPENROUTER_API_KEY, using OpenRouter DeepSeek R1 Distill Qwen-14B (free model)")
+        return "openrouter:deepseek/deepseek-r1-distill-qwen-14b"
+    elif gemini_key:
         logger.info("Detected GEMINI_API_KEY, using Google Gemini 2.5 Flash")
         return "google:gemini-2.5-flash"
     elif openai_key:
@@ -73,9 +77,10 @@ def detect_available_model():
         return "openai:gpt-4o-mini"
     else:
         raise ValueError(
-            "No API keys found. Please set one of the following environment variables:\n"
-            "  - GEMINI_API_KEY (recommended, get from https://makersuite.google.com/app/apikey)\n"
-            "  - OPENAI_API_KEY (get from https://platform.openai.com/api-keys)"
+            "No API keys found. Please get a free API key from:\n"
+            "  - OpenRouter (recommended for free): https://openrouter.ai/keys\n"
+            "  - Gemini (Google's comprehensive): https://makersuite.google.com/app/apikey\n"
+            "  - OpenAI (premium): https://platform.openai.com/api-keys"
         )
 
 def get_llm(model_spec: str = None):
@@ -112,6 +117,16 @@ def get_llm(model_spec: str = None):
             google_api_key=api_key,
             temperature=0
         )
+    elif provider == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable not set")
+        return ChatOpenAI(
+            temperature=0,
+            openai_api_key=api_key,
+            model_name=model_name,
+            base_url="https://openrouter.ai/api/v1"
+        )
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -121,9 +136,15 @@ def main():
     )
     parser_arg.add_argument("documents", nargs="+", help="List of document paths to process")
     parser_arg.add_argument(
-        "--model", 
+        "--model",
         default=None,
-        help="Model specification in format provider:model_name (e.g., openai:gpt-4o, google:gemini-2.5-flash). If not specified, automatically detects based on available API keys."
+        help="Model specification in format provider:model_name. If not specified, automatically detects based on available API keys. Examples:\n"
+        "  • openai:gpt-5-mini\n"
+        "  • google:gemini-2.5-flash\n"
+        "  • openrouter:deepseek/deepseek-r1-distill-qwen-14b (default, free, excellent)\n"
+        "  • openrouter:gpt-oss-20b (free GPT model)\n"
+        "  • openrouter:meta-llama/llama-4 (latest Llama model)\n"
+        "  • openrouter:meta-llama/llama-3.1-8b-instruct (free Llama model)"
     )
     args = parser_arg.parse_args()
 
@@ -158,8 +179,82 @@ def main():
             logger.info(f"PDF text extraction result for {document_path}:{text_extracted}")
 
         try:
-            model_with_structured_output = llm.with_structured_output(ScannedDocumentMetadata)
-            classification_result = model_with_structured_output.invoke(f"Classify the following scanned document text\n<text>{text_extracted}</text>")
+            # For OpenRouter, try structured output first, fallback to unstructured if it fails
+            if model_spec and model_spec.startswith("openrouter:"):
+                try:
+                    model_with_structured_output = llm.with_structured_output(ScannedDocumentMetadata)
+                    classification_result = model_with_structured_output.invoke(f"Classify the following scanned document text\n<text>{text_extracted}</text>")
+                    logger.info(f"Structured output result: {classification_result}")
+
+                    # Check if structured output returned None
+                    if classification_result is None:
+                        raise ValueError("Structured output returned None")
+
+                except Exception as e:
+                    # Fallback to unstructured response for models that don't support structured output
+                    logger.info(f"Structured output not supported: {e}, falling back to unstructured parsing")
+                    response = llm.invoke(f"Classify the following scanned document text\n<text>{text_extracted}</text>\n\nReturn as JSON with these exact keys: type, merchant, place, date, total, summary, short_description, currency")
+
+                    # Debug logging
+                    logger.info(f"Raw response content: {response.content}")
+
+                    # Try to parse JSON from response
+                    import json
+                    import re
+                    try:
+                        # Clean up the response content by removing markdown code blocks
+                        content = response.content.strip()
+                        content = re.sub(r'```\w*\n?', '', content, flags=re.DOTALL)
+                        content = content.strip()
+
+                        logger.info(f"Cleaned response content: {content}")
+
+                        classification_result = ScannedDocumentMetadata.parse_raw(content)
+                    except Exception as parse_error:
+                        logger.info(f"JSON parsing failed: {parse_error}")
+                        # Manual parsing from structured OCR
+                        merchant = None
+                        place = None
+                        date = None
+                        total = None
+                        currency = "USD"
+
+                        # Extract merchant from OCR (first non-empty line)
+                        lines = [line.strip() for line in text_extracted.split('\n') if line.strip()]
+                        if lines:
+                            merchant = lines[0] if len(lines[0]) > 3 else None  # First line is usually merchant
+
+                        # Extract date from various formats
+                        for line in text_extracted.split('\n'):
+                            # Try MM.DD.YYYY format
+                            date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{4})', line)
+                            if date_match:
+                                date = f"{date_match.group(3)}-{date_match.group(2).zfill(2)}-{date_match.group(1).zfill(2)}"
+                                break
+                            # Try DD.MM.YYYY format
+                            date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{4})', line)
+                            if date_match:
+                                date = f"{date_match.group(3)}-{date_match.group(2).zfill(2)}-{date_match.group(1).zfill(2)}"
+                                break
+
+                        # Extract total amount (usually the highest or last number with decimal)
+                        total_match = re.search(r'(\d+\.\d{2})', text_extracted)
+                        if total_match:
+                            total = float(total_match.group(1))
+
+                        classification_result = ScannedDocumentMetadata(
+                            type="receipt",
+                            merchant=merchant,
+                            place=place,
+                            date=date,
+                            total=total,
+                            sumary=f"Purchase receipt from {merchant}" if merchant else "Processed document",
+                            short_description=f"{" ".join(merchant.split()[:2])} receipt" if merchant else "receipt",
+                            currency=currency
+                        )
+            else:
+                model_with_structured_output = llm.with_structured_output(ScannedDocumentMetadata)
+                classification_result = model_with_structured_output.invoke(f"Classify the following scanned document text\n<text>{text_extracted}</text>")
             logger.info(f"{classification_result}")
 
             _, file_extension = os.path.splitext(document_path)

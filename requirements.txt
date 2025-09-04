@@ -8,3 +8,4 @@ langchain-openai
 langchain-google-genai
 PyPDF2
 pdf2image
+requests
