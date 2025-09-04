@@ -13,8 +13,7 @@ from pdf2image import convert_from_path
 from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import init_chat_model
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -85,50 +84,36 @@ def detect_available_model():
 
 def get_llm(model_spec: str = None):
     """
-    Create an LLM instance based on the model specification.
+    Create an LLM instance based on the model specification using init_chat_model.
     If no model_spec provided, automatically detect based on available API keys.
-    Format: provider:model_name (e.g., "openai:gpt-4o", "google:gemini-2.5-flash")
+    Format: provider:model_name (e.g., "openai:gpt-5-mini", "google:gemini-2.5-flash")
     """
     if model_spec is None:
         model_spec = detect_available_model()
-    
+
     provider, model_name = model_spec.split(":", 1)
-    
+
+    # Prepare kwargs for special configurations
+    kwargs = {}
+
     if provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
         # Check for custom API base URL
         base_url = os.environ.get("OPENAI_API_BASE")
-        if base_url and not base_url.endswith("/v1"):
-            base_url = base_url.rstrip("/") + "/v1"
-        return ChatOpenAI(
-            temperature=0,
-            openai_api_key=api_key,
-            model_name=model_name,
-            base_url=base_url if base_url else None
-        )
-    elif provider == "google":
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable not set")
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
-            temperature=0
-        )
+        if base_url:
+            if not base_url.endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
+            kwargs["base_url"] = base_url
     elif provider == "openrouter":
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable not set")
-        return ChatOpenAI(
-            temperature=0,
-            openai_api_key=api_key,
-            model_name=model_name,
-            base_url="https://openrouter.ai/api/v1"
-        )
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+        # OpenRouter uses OpenAI-compatible API with custom base URL
+        kwargs["base_url"] = "https://openrouter.ai/api/v1"
+
+    # Use init_chat_model to create the model instance
+    return init_chat_model(
+        model=model_name,
+        model_provider=provider,
+        temperature=0,
+        **kwargs
+    )
 
 def main():
     parser_arg = argparse.ArgumentParser(

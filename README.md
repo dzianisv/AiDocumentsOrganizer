@@ -51,7 +51,7 @@ doc-organizer *.png *.pdf
 
 # Specify a model explicitly
 doc-organizer --model google:gemini-2.5-flash receipt.jpg
-doc-organizer --model openai:gpt-4o document.pdf
+doc-organizer --model openai:gpt-5-mini document.pdf
 ```
 
 ## Model Configuration
@@ -61,7 +61,7 @@ doc-organizer --model openai:gpt-4o document.pdf
 The tool automatically selects the best available model based on your environment variables:
 
 1. If `GEMINI_API_KEY` is set → Uses `google:gemini-2.5-flash` (default)
-2. If only `OPENAI_API_KEY` is set → Uses `openai:gpt-4o-mini`
+2. If only `OPENAI_API_KEY` is set → Uses `openai:gpt-5-mini-mini`
 3. No API keys → Error with instructions
 
 ### Manual Model Selection
@@ -71,8 +71,8 @@ You can override automatic detection with the `--model` parameter:
 ```shell
 # Format: provider:model_name
 doc-organizer --model google:gemini-2.5-flash receipt.jpg
-doc-organizer --model openai:gpt-4o invoice.pdf
-doc-organizer --model openai:gpt-4o-mini document.png
+doc-organizer --model openai:gpt-5-mini invoice.pdf
+doc-organizer --model openai:gpt-5-mini-mini document.png
 ```
 
 ### Supported Models
@@ -83,8 +83,8 @@ doc-organizer --model openai:gpt-4o-mini document.png
 - `google:gemini-1.5-flash`
 
 **OpenAI:**
-- `openai:gpt-4o` (most capable)
-- `openai:gpt-4o-mini` (faster, cheaper)
+- `openai:gpt-5-mini` (most capable)
+- `openai:gpt-5-mini-mini` (faster, cheaper)
 - `openai:gpt-3.5-turbo` (legacy)
 
 ## How It Works
